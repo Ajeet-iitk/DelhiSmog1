@@ -1,0 +1,1750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Delhi Smog Racer: AQI 999+</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Chakra+Petch:ital,wght@0,500;0,700;1,700&family=Inter:wght@400;600;800&display=swap" rel="stylesheet">
+    <style>
+        * {
+            user-select: none;
+            -webkit-user-select: none;
+            -webkit-touch-callout: none;
+        }
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #3a3228;
+            font-family: 'Inter', sans-serif;
+            touch-action: none;
+        }
+        .font-hud {
+            font-family: 'Chakra Petch', sans-serif;
+        }
+        #game-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+        #hud-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+        .interactive {
+            pointer-events: auto;
+        }
+        /* Windshield & Mask Overlays */
+        #smog-vignette {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 4;
+            box-shadow: inset 0 0 110px rgba(95, 75, 45, 0.78);
+            transition: box-shadow 0.4s ease;
+        }
+        #mask-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0;
+            transition: opacity 0.3s ease;
+            background: radial-gradient(circle at center, transparent 45%, rgba(16, 185, 129, 0.32) 100%);
+            border: 4px solid rgba(16, 185, 129, 0.5);
+        }
+        #water-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 5;
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            background: radial-gradient(circle at 50% 60%, rgba(56, 189, 248, 0.25), transparent 70%);
+        }
+        #damage-overlay {
+            position: absolute;
+            inset: 0;
+            pointer-events: none;
+            z-index: 6;
+            opacity: 0;
+            transition: opacity 0.15s ease;
+            background: radial-gradient(circle, transparent 40%, rgba(239, 68, 68, 0.65) 100%);
+        }
+        /* Button styling */
+        .game-btn {
+            transition: transform 0.08s ease, filter 0.15s ease, box-shadow 0.15s ease;
+        }
+        .game-btn:active {
+            transform: scale(0.92);
+            filter: brightness(1.15);
+        }
+        @keyframes pulse-danger {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.06); opacity: 0.8; }
+        }
+        .danger-pulse {
+            animation: pulse-danger 1s infinite;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- 3D Three.js Canvas -->
+    <canvas id="game-canvas"></canvas>
+
+    <!-- Atmospheric Screen Overlays -->
+    <div id="smog-vignette"></div>
+    <div id="mask-overlay"></div>
+    <div id="water-overlay"></div>
+    <div id="damage-overlay"></div>
+
+    <!-- HUD Layer -->
+    <div id="hud-layer" class="p-2.5 sm:p-4">
+        
+        <!-- TOP ROW: Stats + Delhi Ka Map -->
+        <div class="flex justify-between items-start gap-2 w-full">
+            
+            <!-- Left Panel: AQI, Lung Health, Water Lifeline -->
+            <div class="bg-slate-950/85 backdrop-blur-md border border-amber-500/40 rounded-2xl p-2.5 sm:p-3.5 w-[210px] sm:w-72 shadow-2xl">
+                <!-- AQI Header -->
+                <div class="flex items-center justify-between border-b border-slate-800 pb-1.5 mb-2">
+                    <div>
+                        <span class="text-[10px] sm:text-xs uppercase tracking-wider text-amber-300/80 font-semibold block">Delhi AQI Meter</span>
+                        <div class="flex items-baseline gap-1.5">
+                            <span id="aqi-value" class="font-hud text-xl sm:text-2xl font-bold text-red-500 danger-pulse">845</span>
+                            <span id="aqi-status" class="text-[10px] bg-red-600/30 border border-red-500/50 text-red-200 px-1.5 py-0.5 rounded font-bold uppercase">Hazardous</span>
+                        </div>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-[10px] text-slate-400 block">SPEED</span>
+                        <span id="speed-val" class="font-hud text-sm sm:text-base font-bold text-amber-400">68 <small class="text-[10px]">km/h</small></span>
+                    </div>
+                </div>
+
+                <!-- Lung Health Bar -->
+                <div class="mb-2">
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-rose-300 flex items-center gap-1">
+                            🫁 Lung Health
+                            <span id="shield-badge" class="hidden text-[10px] bg-emerald-500/30 text-emerald-300 border border-emerald-400/50 px-1 rounded">N95 ON</span>
+                        </span>
+                        <span id="health-text" class="font-hud font-bold text-white">100%</span>
+                    </div>
+                    <div class="w-full h-3 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                        <div id="health-bar" class="h-full bg-gradient-to-r from-red-600 via-rose-500 to-emerald-400 transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+
+                <!-- Water Lifeline Bar -->
+                <div>
+                    <div class="flex justify-between text-xs mb-1">
+                        <span class="font-bold text-sky-300 flex items-center gap-1">💧 Water Lifeline</span>
+                        <span id="water-text" class="font-hud font-bold text-sky-200">100%</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-slate-800 rounded-full overflow-hidden border border-slate-700">
+                        <div id="water-bar" class="h-full bg-gradient-to-r from-blue-600 to-cyan-300 transition-all duration-150" style="width: 100%;"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Dynamic Event Toast -->
+            <div class="hidden md:flex flex-col items-center pointer-events-none">
+                <div class="bg-slate-950/75 border border-slate-700/80 px-4 py-1.5 rounded-full text-xs text-amber-200 font-semibold shadow-lg">
+                    🚗 FPV Dashboard View • Collect 😷 N95 Masks & 💧 Water Tankers
+                </div>
+                <div id="event-toast" class="mt-2 px-4 py-1 rounded-full text-xs font-bold bg-amber-500 text-slate-950 opacity-0 transition-opacity duration-300 shadow-lg">
+                    N95 Collected!
+                </div>
+            </div>
+
+            <!-- Right Panel: "Delhi Ka Map" Radar & Score -->
+            <div class="bg-slate-950/85 backdrop-blur-md border border-amber-500/40 rounded-2xl p-2.5 sm:p-3 w-[155px] sm:w-56 shadow-2xl flex flex-col">
+                <div class="flex items-center justify-between mb-1">
+                    <span class="font-hud text-xs sm:text-sm font-bold text-amber-400 tracking-wide">🗺️ DELHI KA MAP</span>
+                    <span id="distance-val" class="font-hud text-[11px] font-bold text-emerald-400">0.0 km</span>
+                </div>
+                
+                <!-- Current Landmark -->
+                <div class="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 mb-1.5 flex items-center justify-between">
+                    <span class="text-[10px] text-slate-400">LOC:</span>
+                    <span id="landmark-name" class="font-hud text-[11px] sm:text-xs font-bold text-amber-300 truncate">India Gate</span>
+                </div>
+
+                <!-- Live Radar Mini-Map Canvas -->
+                <div class="relative w-full h-24 sm:h-28 bg-slate-900 rounded-xl border border-slate-700/80 overflow-hidden mb-1.5">
+                    <canvas id="minimap-canvas" class="w-full h-full block"></canvas>
+                    <div class="absolute bottom-1 right-1.5 text-[9px] text-slate-400 font-mono">RING RD</div>
+                </div>
+
+                <!-- Mask Score & Inventory -->
+                <div class="flex items-center justify-between bg-emerald-950/60 border border-emerald-600/40 rounded-lg px-2 py-1">
+                    <span class="text-[11px] text-emerald-200 font-semibold">😷 Masks:</span>
+                    <div class="flex items-center gap-1.5">
+                        <span id="mask-collected-total" class="font-hud text-xs sm:text-sm font-bold text-white">0</span>
+                        <span class="text-[10px] bg-emerald-500/30 text-emerald-300 px-1.5 rounded font-bold" id="mask-stock-pill">Stock: 2</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Toast Notification -->
+        <div class="flex md:hidden justify-center pointer-events-none">
+            <div id="event-toast-mobile" class="px-3 py-1 rounded-full text-xs font-bold bg-amber-400 text-slate-950 opacity-0 transition-opacity duration-300 shadow-md">
+                N95 Mask Collected!
+            </div>
+        </div>
+
+        <!-- BOTTOM ROW: Controls & Action Buttons -->
+        <div class="w-full flex flex-col gap-2 pb-1 sm:pb-2">
+            
+            <!-- Active Mask Timer Banner -->
+            <div id="mask-timer-banner" class="hidden self-center bg-emerald-900/90 border border-emerald-400 text-emerald-100 px-4 py-1 rounded-full text-xs font-bold shadow-lg flex items-center gap-2">
+                <span>😷 N95 SHIELD ACTIVE: NO SMOG DRAIN</span>
+                <span id="mask-timer-sec" class="font-hud text-emerald-300 font-extrabold">8.0s</span>
+            </div>
+
+            <div class="flex justify-between items-end w-full gap-2">
+                <!-- Left: Steering Touch Controls -->
+                <div class="flex gap-2 sm:gap-3 interactive">
+                    <button id="btn-left" aria-label="Steer Left" class="game-btn w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border-2 border-amber-500/60 shadow-xl flex flex-col items-center justify-center text-amber-300 active:bg-amber-500 active:text-slate-950">
+                        <svg class="w-7 h-7 sm:w-8 sm:h-8" fill="none" stroke="currentColor" stroke-width="2.8" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                        </svg>
+                        <span class="text-[10px] font-bold tracking-wider uppercase">Left</span>
+                    </button>
+                    <button id="btn-right" aria-label="Steer Right" class="game-btn w-16 h-16 sm:w-20 sm:h-20 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border-2 border-amber-500/60 shadow-xl flex flex-col items-center justify-center text-amber-300 active:bg-amber-500 active:text-slate-950">
+                        <svg class="w-7 h-7 sm:w-8 sm:h-8" fill="none" stroke="currentColor" stroke-width="2.8" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                        </svg>
+                        <span class="text-[10px] font-bold tracking-wider uppercase">Right</span>
+                    </button>
+                </div>
+
+                <!-- Center: Horn / Brake & Keyboard Hint -->
+                <div class="flex flex-col items-center gap-1 interactive">
+                    <button id="btn-horn" class="game-btn px-3.5 py-2 rounded-xl bg-amber-500/90 hover:bg-amber-400 text-slate-950 font-hud font-bold text-xs shadow-lg border border-amber-300 flex items-center gap-1">
+                        🎺 HORN OK PLEASE
+                    </button>
+                    <span class="hidden sm:inline text-[11px] text-slate-300/80 bg-slate-950/70 px-2.5 py-0.5 rounded-full">
+                        Keys: <b>A/D</b> or <b>◀/▶</b> Steer • <b>W/Space</b> Spray Water • <b>M/Shift</b> Activate Mask • <b>H</b> Horn
+                    </span>
+                </div>
+
+                <!-- Right: Power-up Action Buttons (Spray Water & Activate Mask) -->
+                <div class="flex gap-2 sm:gap-3 interactive">
+                    <!-- Activate Mask Button -->
+                    <button id="btn-mask" class="game-btn relative w-20 h-16 sm:w-28 sm:h-20 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-800 border-2 border-emerald-300/80 shadow-xl flex flex-col items-center justify-center text-white px-1">
+                        <span id="btn-mask-badge" class="absolute -top-2 -right-1.5 bg-amber-400 text-slate-950 font-hud font-extrabold text-xs px-2 py-0.5 rounded-full border border-slate-900 shadow">
+                            x2
+                        </span>
+                        <span class="text-lg sm:text-2xl leading-none">😷</span>
+                        <span class="font-hud text-[10px] sm:text-xs font-bold uppercase tracking-tight mt-1">Activate Mask</span>
+                    </button>
+
+                    <!-- Spray Water (Anti-Smog Gun) Button -->
+                    <button id="btn-spray" class="game-btn relative w-20 h-16 sm:w-28 sm:h-20 rounded-2xl bg-gradient-to-br from-sky-500 to-blue-700 border-2 border-cyan-300/80 shadow-xl flex flex-col items-center justify-center text-white px-1">
+                        <span class="absolute -top-2 -right-1.5 bg-sky-200 text-slate-950 font-hud font-extrabold text-[10px] px-1.5 py-0.5 rounded-full border border-slate-900 shadow">
+                            HOLD
+                        </span>
+                        <span class="text-lg sm:text-2xl leading-none">🚿</span>
+                        <span class="font-hud text-[10px] sm:text-xs font-bold uppercase tracking-tight mt-1">Spray Water</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- START / GAME OVER MODAL OVERLAY -->
+    <div id="modal-overlay" class="fixed inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+        <div class="bg-slate-900 border-2 border-amber-500/70 rounded-3xl max-w-md w-full p-5 sm:p-6 text-white shadow-2xl">
+            <div class="flex items-center justify-between mb-2">
+                <span class="text-xs font-hud uppercase tracking-widest bg-red-600/30 border border-red-500 text-red-300 px-2.5 py-0.5 rounded-full font-bold">
+                    ⚠️ EMERGENCY AQI 999+
+                </span>
+                <span class="text-xs text-amber-300 font-hud font-semibold">3D FPV EDITION</span>
+            </div>
+
+            <h1 id="modal-title" class="font-hud text-2xl sm:text-3xl font-extrabold text-amber-400 tracking-wide mb-2">
+                DELHI SMOG RACER
+            </h1>
+            <p id="modal-subtitle" class="text-xs sm:text-sm text-slate-300 mb-4 leading-relaxed">
+                Drive through peak Delhi winter smog from inside the cockpit! Collect <b>N95 Masks</b> lying on the road, dodge <b>wandering cows</b>, <b>deep potholes</b>, and <b>swerving NPC cars</b> that crash into each other.
+            </p>
+
+            <!-- Final Stats Box (Hidden on initial start) -->
+            <div id="final-stats" class="hidden bg-slate-950/90 border border-slate-800 rounded-2xl p-3.5 mb-4 grid grid-cols-3 gap-2 text-center">
+                <div>
+                    <span class="text-[10px] text-slate-400 block uppercase">Masks Collected</span>
+                    <span id="stat-masks" class="font-hud text-xl font-bold text-emerald-400">0</span>
+                </div>
+                <div>
+                    <span class="text-[10px] text-slate-400 block uppercase">Distance</span>
+                    <span id="stat-dist" class="font-hud text-xl font-bold text-amber-400">0.0 km</span>
+                </div>
+                <div>
+                    <span class="text-[10px] text-slate-400 block uppercase">Last Landmark</span>
+                    <span id="stat-loc" class="font-hud text-xs font-bold text-sky-300 block mt-1 truncate">ITO</span>
+                </div>
+            </div>
+
+            <!-- Feature Guide Grid -->
+            <div class="grid grid-cols-2 gap-2 text-xs mb-5">
+                <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-xl">
+                    <div class="font-bold text-emerald-400 mb-0.5">😷 Collect & Activate N95</div>
+                    <p class="text-[11px] text-slate-300">Pick up masks on the road (+Health & Stock). Press <b>Activate Mask</b> to block AQI lung drain.</p>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-xl">
+                    <div class="font-bold text-sky-400 mb-0.5">🚿 Anti-Smog Water Gun</div>
+                    <p class="text-[11px] text-slate-300">Hold <b>Spray Water</b> to clear thick smog, lower AQI & heal lungs. Refill via <b>Water Drops</b>.</p>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-xl">
+                    <div class="font-bold text-amber-300 mb-0.5">🐄 Cows & 🕳️ Potholes</div>
+                    <p class="text-[11px] text-slate-300">Cows sit calmly in lanes. Potholes jolt your suspension. Horn nudges cows & cars aside!</p>
+                </div>
+                <div class="bg-slate-800/80 border border-slate-700 p-2.5 rounded-xl">
+                    <div class="font-bold text-rose-400 mb-0.5">💥 Chaotic NPC Traffic</div>
+                    <p class="text-[11px] text-slate-300">Autos, taxis & sedans swerve wildly and collide with each other. Watch out for pile-ups!</p>
+                </div>
+            </div>
+
+            <button id="btn-start-game" class="game-btn w-full py-3.5 rounded-2xl bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-slate-950 font-hud font-extrabold text-base sm:text-lg tracking-wider uppercase shadow-xl border border-amber-200">
+                🚀 Start Engine & Enter Ring Road
+            </button>
+        </div>
+    </div>
+
+    <script>
+        /********************************************************************
+         * DELHI SMOG RACER - 3D FPV THREE.JS GAME
+         ********************************************************************/
+
+        // --- DELHI LANDMARKS FOR "DELHI KA MAP" ---
+        const DELHI_LANDMARKS = [
+            { name: "India Gate Circle", dist: 0.0 },
+            { name: "Connaught Place", dist: 0.6 },
+            { name: "ITO Crossing", dist: 1.3 },
+            { name: "Sarai Kale Khan", dist: 2.1 },
+            { name: "AIIMS Flyover", dist: 3.0 },
+            { name: "Dhaula Kuan", dist: 4.0 },
+            { name: "Kashmere Gate ISBT", dist: 5.2 },
+            { name: "Anand Vihar (AQI Peak)", dist: 6.5 },
+            { name: "Mukarba Chowk", dist: 8.0 }
+        ];
+
+        // --- WEB AUDIO SYNTHESIZER (NO EXTERNAL ASSETS NEEDED) ---
+        class SoundFX {
+            constructor() {
+                this.ctx = null;
+            }
+            init() {
+                if (!this.ctx) {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (AudioCtx) this.ctx = new AudioCtx();
+                }
+                if (this.ctx && this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+            playPickup(type = 'mask') {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = type === 'mask' ? 'triangle' : 'sine';
+                osc.frequency.setValueAtTime(type === 'mask' ? 520 : 440, now);
+                osc.frequency.exponentialRampToValueAtTime(type === 'mask' ? 980 : 880, now + 0.16);
+                gain.gain.setValueAtTime(0.15, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.18);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.18);
+            }
+            playCrash() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(140, now);
+                osc.frequency.exponentialRampToValueAtTime(38, now + 0.28);
+                gain.gain.setValueAtTime(0.26, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+            }
+            playHorn() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                // Classic Indian truck/car dual-tone horn
+                [390, 490].forEach(freq => {
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'square';
+                    osc.frequency.setValueAtTime(freq, now);
+                    gain.gain.setValueAtTime(0.08, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.25);
+                });
+            }
+            playMaskActivate() {
+                if (!this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sine';
+                osc.frequency.setValueAtTime(320, now);
+                osc.frequency.exponentialRampToValueAtTime(760, now + 0.25);
+                gain.gain.setValueAtTime(0.14, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.28);
+            }
+        }
+
+        const sfx = new SoundFX();
+
+        // --- GAME STATE ---
+        const state = {
+            running: false,
+            speed: 52,            // world units per sec
+            baseSpeed: 52,
+            playerX: 0,
+            targetVelocityX: 0,
+            steerInput: 0,        // -1 left, 0 neutral, 1 right
+            wheelAngle: 0,
+            roadWidth: 24,        // X from -11 to +11
+            distanceKm: 0,
+            aqi: 860,
+            baseAqi: 860,
+            lungHealth: 100,
+            waterTank: 100,
+            masksCollected: 0,
+            maskInventory: 2,
+            maskActiveTimer: 0,
+            isSpraying: false,
+            cameraShake: 0,
+            cockpitBob: 0,
+            spawnTimers: {
+                npc: 0,
+                cow: 0,
+                pothole: 0,
+                mask: 0,
+                water: 0
+            }
+        };
+
+        // --- THREE.JS GLOBALS ---
+        let scene, camera, renderer, clock;
+        let cockpitGroup, steeringWheelGroup, wiperLeft, wiperRight, sprayNozzleMist;
+        let aqiDashCanvas, aqiDashCtx, aqiDashTexture;
+
+        // Object pools / active lists
+        const roadStripes = [];
+        const roadsideProps = [];
+        const npcCars = [];
+        const cows = [];
+        const potholes = [];
+        const collectibles = []; // masks & water drops
+        const particles = [];    // collision sparks & water mist droplets
+        let smogParticles;
+
+        // Colors
+        const SMOG_COLOR_THICK = new THREE.Color(0x5c4d3c);
+        const SMOG_COLOR_CLEAR = new THREE.Color(0x87a0b2);
+        const currentFogColor = SMOG_COLOR_THICK.clone();
+
+        // DOM Elements
+        const elAqiValue = document.getElementById('aqi-value');
+        const elAqiStatus = document.getElementById('aqi-status');
+        const elSpeedVal = document.getElementById('speed-val');
+        const elHealthBar = document.getElementById('health-bar');
+        const elHealthText = document.getElementById('health-text');
+        const elShieldBadge = document.getElementById('shield-badge');
+        const elWaterBar = document.getElementById('water-bar');
+        const elWaterText = document.getElementById('water-text');
+        const elDistanceVal = document.getElementById('distance-val');
+        const elLandmarkName = document.getElementById('landmark-name');
+        const elMaskTotal = document.getElementById('mask-collected-total');
+        const elMaskStockPill = document.getElementById('mask-stock-pill');
+        const elBtnMaskBadge = document.getElementById('btn-mask-badge');
+        const elMaskTimerBanner = document.getElementById('mask-timer-banner');
+        const elMaskTimerSec = document.getElementById('mask-timer-sec');
+        const elMaskOverlay = document.getElementById('mask-overlay');
+        const elWaterOverlay = document.getElementById('water-overlay');
+        const elDamageOverlay = document.getElementById('damage-overlay');
+        const elSmogVignette = document.getElementById('smog-vignette');
+        const elModalOverlay = document.getElementById('modal-overlay');
+        const elModalTitle = document.getElementById('modal-title');
+        const elModalSubtitle = document.getElementById('modal-subtitle');
+        const elFinalStats = document.getElementById('final-stats');
+        const elToastDesktop = document.getElementById('event-toast');
+        const elToastMobile = document.getElementById('event-toast-mobile');
+
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+
+        let toastTimeout = null;
+        function showToast(msg, bgClass = 'bg-amber-400 text-slate-950') {
+            [elToastDesktop, elToastMobile].forEach(el => {
+                if (!el) return;
+                el.textContent = msg;
+                el.className = `px-3.5 py-1 rounded-full text-xs font-bold shadow-lg transition-opacity duration-200 ${bgClass}`;
+                el.style.opacity = '1';
+            });
+            clearTimeout(toastTimeout);
+            toastTimeout = setTimeout(() => {
+                if (elToastDesktop) elToastDesktop.style.opacity = '0';
+                if (elToastMobile) elToastMobile.style.opacity = '0';
+            }, 1400);
+        }
+
+        // --- INITIALIZE THREE.JS SCENE ---
+        function initThree() {
+            const canvas = document.getElementById('game-canvas');
+            renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+
+            scene = new THREE.Scene();
+            scene.background = currentFogColor;
+            // Exponential fog for authentic heavy Delhi winter smog
+            scene.fog = new THREE.FogExp2(currentFogColor, 0.022);
+
+            // First-Person View (FPV) Camera inside car cabin
+            camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 240);
+            camera.position.set(0, 2.15, 0.6);
+            camera.rotation.x = -0.05;
+
+            clock = new THREE.Clock();
+
+            // Lighting
+            const ambientLight = new THREE.AmbientLight(0xd9c3a8, 0.75);
+            scene.add(ambientLight);
+
+            const sunLight = new THREE.DirectionalLight(0xffb36b, 0.9);
+            sunLight.position.set(25, 50, -40);
+            sunLight.castShadow = true;
+            scene.add(sunLight);
+
+            // Build Environment, FPV Cockpit, and Smog
+            buildRoadAndEnvironment();
+            buildFPVCockpit();
+            buildAmbientSmogParticles();
+
+            window.addEventListener('resize', onWindowResize);
+            resizeMinimap();
+        }
+
+        function resizeMinimap() {
+            minimapCanvas.width = minimapCanvas.clientWidth || 180;
+            minimapCanvas.height = minimapCanvas.clientHeight || 100;
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            resizeMinimap();
+        }
+
+        // --- BUILD DELHI ROAD & ROADSIDE PROPS ---
+        function buildRoadAndEnvironment() {
+            // Ground plane
+            const groundGeo = new THREE.PlaneGeometry(300, 350);
+            const groundMat = new THREE.MeshLambertMaterial({ color: 0x3b332a });
+            const ground = new THREE.Mesh(groundGeo, groundMat);
+            ground.rotation.x = -Math.PI / 2;
+            ground.position.z = -140;
+            scene.add(ground);
+
+            // Main Asphalt Road (4 Lanes)
+            const roadGeo = new THREE.PlaneGeometry(state.roadWidth, 350);
+            const roadMat = new THREE.MeshStandardMaterial({
+                color: 0x262629,
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const road = new THREE.Mesh(roadGeo, roadMat);
+            road.rotation.x = -Math.PI / 2;
+            road.position.y = 0.01;
+            road.position.z = -140;
+            road.receiveShadow = true;
+            scene.add(road);
+
+            // Side Curbs (Yellow & Black Delhi style)
+            const curbGeo = new THREE.BoxGeometry(0.8, 0.35, 350);
+            const curbMat = new THREE.MeshLambertMaterial({ color: 0xd99b26 });
+            const leftCurb = new THREE.Mesh(curbGeo, curbMat);
+            leftCurb.position.set(-state.roadWidth / 2 - 0.4, 0.18, -140);
+            scene.add(leftCurb);
+
+            const rightCurb = new THREE.Mesh(curbGeo, curbMat);
+            rightCurb.position.set(state.roadWidth / 2 + 0.4, 0.18, -140);
+            scene.add(rightCurb);
+
+            // Animated Lane Stripes
+            const stripeGeo = new THREE.PlaneGeometry(0.3, 4.5);
+            const stripeMat = new THREE.MeshBasicMaterial({ color: 0xe5e7eb });
+            const laneXPositions = [-6, 0, 6];
+
+            for (let i = 0; i < 24; i++) {
+                const zPos = -i * 10;
+                laneXPositions.forEach(lx => {
+                    const stripe = new THREE.Mesh(stripeGeo, stripeMat);
+                    stripe.rotation.x = -Math.PI / 2;
+                    stripe.position.set(lx, 0.03, zPos);
+                    scene.add(stripe);
+                    roadStripes.push(stripe);
+                });
+            }
+
+            // Roadside Delhi Metro Pillars, Streetlights & Overhead Signboards
+            for (let i = 0; i < 12; i++) {
+                const zPos = -i * 22;
+                const propGroup = new THREE.Group();
+
+                // Left & Right Streetlight poles
+                const poleGeo = new THREE.CylinderGeometry(0.18, 0.22, 9, 8);
+                const poleMat = new THREE.MeshLambertMaterial({ color: 0x52525b });
+
+                const leftPole = new THREE.Mesh(poleGeo, poleMat);
+                leftPole.position.set(-state.roadWidth / 2 - 2.2, 4.5, 0);
+                propGroup.add(leftPole);
+
+                const rightPole = new THREE.Mesh(poleGeo, poleMat);
+                rightPole.position.set(state.roadWidth / 2 + 2.2, 4.5, 0);
+                propGroup.add(rightPole);
+
+                // Warm Sodium Streetlight Bulbs
+                const bulbGeo = new THREE.SphereGeometry(0.45, 8, 8);
+                const bulbMat = new THREE.MeshBasicMaterial({ color: 0xffb74d });
+                const leftBulb = new THREE.Mesh(bulbGeo, bulbMat);
+                leftBulb.position.set(-state.roadWidth / 2 - 1.2, 8.8, 0);
+                propGroup.add(leftBulb);
+
+                const rightBulb = new THREE.Mesh(bulbGeo, bulbMat);
+                rightBulb.position.set(state.roadWidth / 2 + 1.2, 8.8, 0);
+                propGroup.add(rightBulb);
+
+                // Every 3rd prop is an overhead green Delhi PWD Sign Gantry or Metro Pillar
+                if (i % 3 === 0) {
+                    const beamGeo = new THREE.BoxGeometry(state.roadWidth + 5, 1.8, 0.4);
+                    const beamMat = new THREE.MeshLambertMaterial({ color: 0x065f46 });
+                    const beam = new THREE.Mesh(beamGeo, beamMat);
+                    beam.position.set(0, 7.8, 0);
+                    propGroup.add(beam);
+                }
+
+                propGroup.position.z = zPos;
+                scene.add(propGroup);
+                roadsideProps.push(propGroup);
+            }
+        }
+
+        // --- BUILD FPV CAR HOOD, DASHBOARD, STEERING WHEEL & ANTI-SMOG NOZZLE ---
+        function buildFPVCockpit() {
+            cockpitGroup = new THREE.Group();
+
+            // Car Hood (Bonnet) visible in front of windshield
+            const hoodGeo = new THREE.BoxGeometry(2.7, 0.35, 2.2);
+            const hoodMat = new THREE.MeshStandardMaterial({
+                color: 0xd97706, // Taxicab / sporty amber-orange hood
+                roughness: 0.3,
+                metalness: 0.5
+            });
+            const hood = new THREE.Mesh(hoodGeo, hoodMat);
+            hood.position.set(0, 1.12, -1.55);
+            hood.rotation.x = 0.08;
+            cockpitGroup.add(hood);
+
+            // Hood Anti-Smog Water Cannon Nozzle
+            const nozzleBase = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.12, 0.16, 0.25, 12),
+                new THREE.MeshStandardMaterial({ color: 0x0284c7, metalness: 0.6, roughness: 0.3 })
+            );
+            nozzleBase.position.set(0, 1.35, -1.6);
+            cockpitGroup.add(nozzleBase);
+
+            // Dashboard Main Console
+            const dashGeo = new THREE.BoxGeometry(3.1, 0.65, 0.9);
+            const dashMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.85 });
+            const dash = new THREE.Mesh(dashGeo, dashMat);
+            dash.position.set(0, 1.25, -0.45);
+            cockpitGroup.add(dash);
+
+            // Windshield Pillars (A-Pillars) & Roof Header for authentic cabin framing
+            const pillarGeo = new THREE.CylinderGeometry(0.07, 0.09, 1.7, 8);
+            const pillarMat = new THREE.MeshLambertMaterial({ color: 0x27272a });
+
+            const leftPillar = new THREE.Mesh(pillarGeo, pillarMat);
+            leftPillar.position.set(-1.38, 2.1, -0.55);
+            leftPillar.rotation.z = -0.22;
+            leftPillar.rotation.x = 0.25;
+            cockpitGroup.add(leftPillar);
+
+            const rightPillar = new THREE.Mesh(pillarGeo, pillarMat);
+            rightPillar.position.set(1.38, 2.1, -0.55);
+            rightPillar.rotation.z = 0.22;
+            rightPillar.rotation.x = 0.25;
+            cockpitGroup.add(rightPillar);
+
+            const roofBar = new THREE.Mesh(
+                new THREE.BoxGeometry(3.2, 0.16, 0.4),
+                pillarMat
+            );
+            roofBar.position.set(0, 2.88, -0.35);
+            cockpitGroup.add(roofBar);
+
+            // Rearview Mirror
+            const mirror = new THREE.Mesh(
+                new THREE.BoxGeometry(0.55, 0.14, 0.08),
+                new THREE.MeshLambertMaterial({ color: 0x09090b })
+            );
+            mirror.position.set(0, 2.65, -0.38);
+            cockpitGroup.add(mirror);
+
+            // Live Digital Dashboard Screen (CanvasTexture showing AQI & Mask status)
+            aqiDashCanvas = document.createElement('canvas');
+            aqiDashCanvas.width = 256;
+            aqiDashCanvas.height = 128;
+            aqiDashCtx = aqiDashCanvas.getContext('2d');
+            aqiDashTexture = new THREE.CanvasTexture(aqiDashCanvas);
+
+            const screenMesh = new THREE.Mesh(
+                new THREE.PlaneGeometry(0.68, 0.32),
+                new THREE.MeshBasicMaterial({ map: aqiDashTexture })
+            );
+            screenMesh.position.set(0.35, 1.56, -0.39);
+            screenMesh.rotation.x = -0.15;
+            cockpitGroup.add(screenMesh);
+
+            // Dashboard Bobblehead / Air Freshener Tree on Left
+            const plantGroup = new THREE.Group();
+            const pot = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.06, 0.05, 0.09, 8),
+                new THREE.MeshLambertMaterial({ color: 0xb45309 })
+            );
+            const leaf = new THREE.Mesh(
+                new THREE.SphereGeometry(0.08, 8, 8),
+                new THREE.MeshLambertMaterial({ color: 0x10b981 })
+            );
+            leaf.position.y = 0.09;
+            plantGroup.add(pot, leaf);
+            plantGroup.position.set(-0.75, 1.6, -0.48);
+            cockpitGroup.add(plantGroup);
+
+            // Windshield Wipers
+            const wiperGeo = new THREE.BoxGeometry(0.65, 0.03, 0.03);
+            const wiperMat = new THREE.MeshBasicMaterial({ color: 0x09090b });
+            wiperLeft = new THREE.Mesh(wiperGeo, wiperMat);
+            wiperLeft.position.set(-0.45, 1.55, -0.62);
+            cockpitGroup.add(wiperLeft);
+
+            wiperRight = new THREE.Mesh(wiperGeo, wiperMat);
+            wiperRight.position.set(0.35, 1.55, -0.62);
+            cockpitGroup.add(wiperRight);
+
+            // Steering Wheel (Positioned slightly left-center for clear visibility)
+            steeringWheelGroup = new THREE.Group();
+            const rimGeo = new THREE.TorusGeometry(0.31, 0.042, 12, 32);
+            const rimMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.4 });
+            const rim = new THREE.Mesh(rimGeo, rimMat);
+            steeringWheelGroup.add(rim);
+
+            // Top Orange Racing Marker on Steering Wheel
+            const topMarker = new THREE.Mesh(
+                new THREE.BoxGeometry(0.07, 0.09, 0.09),
+                new THREE.MeshBasicMaterial({ color: 0xf59e0b })
+            );
+            topMarker.position.set(0, 0.31, 0);
+            steeringWheelGroup.add(topMarker);
+
+            // Wheel Spokes & Center Horn Pad
+            const spokeBar = new THREE.Mesh(
+                new THREE.BoxGeometry(0.58, 0.06, 0.04),
+                new THREE.MeshLambertMaterial({ color: 0x374151 })
+            );
+            steeringWheelGroup.add(spokeBar);
+
+            const vSpoke = new THREE.Mesh(
+                new THREE.BoxGeometry(0.07, 0.3, 0.04),
+                new THREE.MeshLambertMaterial({ color: 0x374151 })
+            );
+            vSpoke.position.set(0, -0.15, 0);
+            steeringWheelGroup.add(vSpoke);
+
+            const hornHub = new THREE.Mesh(
+                new THREE.CylinderGeometry(0.11, 0.11, 0.06, 16),
+                new THREE.MeshLambertMaterial({ color: 0x1f2937 })
+            );
+            hornHub.rotation.x = Math.PI / 2;
+            steeringWheelGroup.add(hornHub);
+
+            steeringWheelGroup.position.set(-0.32, 1.48, -0.18);
+            steeringWheelGroup.rotation.x = -0.35;
+            cockpitGroup.add(steeringWheelGroup);
+
+            scene.add(cockpitGroup);
+            updateDashboardScreen();
+        }
+
+        function updateDashboardScreen() {
+            if (!aqiDashCtx) return;
+            aqiDashCtx.fillStyle = '#090d16';
+            aqiDashCtx.fillRect(0, 0, 256, 128);
+
+            aqiDashCtx.strokeStyle = state.maskActiveTimer > 0 ? '#10b981' : '#f59e0b';
+            aqiDashCtx.lineWidth = 4;
+            aqiDashCtx.strokeRect(4, 4, 248, 120);
+
+            aqiDashCtx.fillStyle = '#94a3b8';
+            aqiDashCtx.font = 'bold 16px sans-serif';
+            aqiDashCtx.fillText('DELHI CABIN SENSOR', 16, 28);
+
+            aqiDashCtx.fillStyle = state.aqi > 700 ? '#ef4444' : (state.aqi > 450 ? '#f59e0b' : '#38bdf8');
+            aqiDashCtx.font = 'bold 34px monospace';
+            aqiDashCtx.fillText(`AQI ${Math.round(state.aqi)}`, 16, 68);
+
+            aqiDashCtx.fillStyle = state.maskActiveTimer > 0 ? '#34d399' : '#fbbf24';
+            aqiDashCtx.font = 'bold 18px sans-serif';
+            const statusTxt = state.maskActiveTimer > 0
+                ? `N95 SHIELD: ${state.maskActiveTimer.toFixed(1)}s`
+                : (state.isSpraying ? 'SPRAYING ANTI-SMOG' : `MASKS: ${state.maskInventory}`);
+            aqiDashCtx.fillText(statusTxt, 16, 104);
+
+            aqiDashTexture.needsUpdate = true;
+        }
+
+        // --- AMBIENT FLOATING SMOG PARTICLES ---
+        function buildAmbientSmogParticles() {
+            const count = 350;
+            const geo = new THREE.BufferGeometry();
+            const positions = new Float32Array(count * 3);
+            for (let i = 0; i < count; i++) {
+                positions[i * 3] = (Math.random() - 0.5) * 36;
+                positions[i * 3 + 1] = Math.random() * 10 + 0.5;
+                positions[i * 3 + 2] = -Math.random() * 120;
+            }
+            geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            const mat = new THREE.PointsMaterial({
+                color: 0xd6c7b2,
+                size: 0.45,
+                transparent: true,
+                opacity: 0.55
+            });
+            smogParticles = new THREE.Points(geo, mat);
+            scene.add(smogParticles);
+        }
+
+        // --- PROCEDURAL 3D MODELS FOR OBSTACLES & COLLECTIBLES ---
+
+        // 1. Chaotic NPC Car (Autos, Yellow-Black Taxis, Hatchbacks)
+        function createNPCCar() {
+            const group = new THREE.Group();
+            const types = [
+                { name: 'auto', color: 0x16a34a, roof: 0xfacc15, width: 1.5, len: 2.7 },   // Delhi Green/Yellow Auto Rickshaw
+                { name: 'taxi', color: 0x18181b, roof: 0xfacc15, width: 1.9, len: 3.8 },   // Kaali-Peeli Taxi
+                { name: 'sedan', color: 0xdc2626, roof: 0xdc2626, width: 2.0, len: 4.1 },  // Red Sedan
+                { name: 'suv', color: 0xe2e8f0, roof: 0xcbd5e1, width: 2.1, len: 4.3 }     // White Delhi SUV
+            ];
+            const spec = types[Math.floor(Math.random() * types.length)];
+
+            // Lower body
+            const body = new THREE.Mesh(
+                new THREE.BoxGeometry(spec.width, 0.85, spec.len),
+                new THREE.MeshLambertMaterial({ color: spec.color })
+            );
+            body.position.y = 0.65;
+            group.add(body);
+
+            // Cabin / Roof
+            const cabin = new THREE.Mesh(
+                new THREE.BoxGeometry(spec.width * 0.86, 0.72, spec.len * 0.58),
+                new THREE.MeshLambertMaterial({ color: spec.roof })
+            );
+            cabin.position.set(0, 1.38, -0.1);
+            group.add(cabin);
+
+            // Bright Red Taillights & Headlights (visible in thick fog)
+            const tailMat = new THREE.MeshBasicMaterial({ color: 0xff2a2a });
+            const leftTail = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.22, 0.1), tailMat);
+            leftTail.position.set(-spec.width * 0.35, 0.72, spec.len / 2 + 0.02);
+            const rightTail = leftTail.clone();
+            rightTail.position.x = spec.width * 0.35;
+            group.add(leftTail, rightTail);
+
+            // Wheels
+            const wheelGeo = new THREE.CylinderGeometry(0.35, 0.35, 0.25, 10);
+            const wheelMat = new THREE.MeshLambertMaterial({ color: 0x111111 });
+            [[-spec.width / 2, -spec.len * 0.3], [spec.width / 2, -spec.len * 0.3],
+             [-spec.width / 2, spec.len * 0.3], [spec.width / 2, spec.len * 0.3]].forEach(([wx, wz]) => {
+                const w = new THREE.Mesh(wheelGeo, wheelMat);
+                w.rotation.z = Math.PI / 2;
+                w.position.set(wx, 0.35, wz);
+                group.add(w);
+            });
+
+            const startX = (Math.random() - 0.5) * (state.roadWidth - 4);
+            group.position.set(startX, 0, -145 - Math.random() * 35);
+
+            // Chaotic swerving parameters
+            group.userData = {
+                speed: 22 + Math.random() * 16,
+                vx: (Math.random() - 0.5) * 9,
+                swerveTimer: Math.random() * 1.5,
+                swerveFreq: 0.7 + Math.random() * 1.2,
+                width: spec.width,
+                length: spec.len,
+                hitCooldown: 0
+            };
+
+            scene.add(group);
+            npcCars.push(group);
+        }
+
+        // 2. Wandering / Sitting Delhi Cow on the Road
+        function createCow() {
+            const group = new THREE.Group();
+            const isSitting = Math.random() < 0.45;
+            const coatMat = new THREE.MeshLambertMaterial({ color: 0xf8fafc });
+            const patchMat = new THREE.MeshLambertMaterial({ color: 0x78350f });
+
+            // Torso
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.35, 1.05, 2.2), coatMat);
+            body.position.y = isSitting ? 0.65 : 1.15;
+            group.add(body);
+
+            // Brown Spot Patch
+            const spot = new THREE.Mesh(new THREE.BoxGeometry(1.38, 0.6, 0.9), patchMat);
+            spot.position.set(0, isSitting ? 0.75 : 1.25, 0.1);
+            group.add(spot);
+
+            // Indian Humped Back
+            const hump = new THREE.Mesh(new THREE.SphereGeometry(0.38, 8, 8), coatMat);
+            hump.position.set(0, isSitting ? 1.2 : 1.7, -0.5);
+            group.add(hump);
+
+            // Head & Horns
+            const head = new THREE.Mesh(new THREE.BoxGeometry(0.75, 0.75, 0.95), coatMat);
+            head.position.set(0, isSitting ? 1.15 : 1.55, -1.25);
+            group.add(head);
+
+            const hornMat = new THREE.MeshLambertMaterial({ color: 0xd97706 });
+            const leftHorn = new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.45, 6), hornMat);
+            leftHorn.position.set(-0.28, isSitting ? 1.65 : 2.05, -1.2);
+            leftHorn.rotation.z = 0.3;
+            const rightHorn = leftHorn.clone();
+            rightHorn.position.x = 0.28;
+            rightHorn.rotation.z = -0.3;
+            group.add(leftHorn, rightHorn);
+
+            // Legs if standing
+            if (!isSitting) {
+                const legGeo = new THREE.BoxGeometry(0.26, 0.85, 0.26);
+                [[-0.45, -0.75], [0.45, -0.75], [-0.45, 0.75], [0.45, 0.75]].forEach(([lx, lz]) => {
+                    const leg = new THREE.Mesh(legGeo, coatMat);
+                    leg.position.set(lx, 0.42, lz);
+                    group.add(leg);
+                });
+            }
+
+            // Slight random rotation so cows face across or along lanes
+            group.rotation.y = (Math.random() - 0.5) * 1.4;
+            const startX = (Math.random() - 0.5) * (state.roadWidth - 5);
+            group.position.set(startX, 0, -140 - Math.random() * 25);
+
+            group.userData = {
+                isSitting,
+                walkVx: isSitting ? 0 : (Math.random() - 0.5) * 2.8,
+                hit: false
+            };
+
+            scene.add(group);
+            cows.push(group);
+        }
+
+        // 3. Deep Pothole
+        function createPothole() {
+            const group = new THREE.Group();
+            const radius = 1.3 + Math.random() * 0.7;
+
+            // Dark ragged crater
+            const crater = new THREE.Mesh(
+                new THREE.CircleGeometry(radius, 10),
+                new THREE.MeshBasicMaterial({ color: 0x09090b })
+            );
+            crater.rotation.x = -Math.PI / 2;
+            crater.position.y = 0.03;
+            group.add(crater);
+
+            // Muddy water / broken asphalt rim
+            const rim = new THREE.Mesh(
+                new THREE.RingGeometry(radius * 0.75, radius * 1.18, 10),
+                new THREE.MeshBasicMaterial({ color: 0x57534e, side: THREE.DoubleSide })
+            );
+            rim.rotation.x = -Math.PI / 2;
+            rim.position.y = 0.04;
+            group.add(rim);
+
+            const startX = (Math.random() - 0.5) * (state.roadWidth - 4);
+            group.position.set(startX, 0, -135);
+            group.userData = { radius, triggered: false };
+
+            scene.add(group);
+            potholes.push(group);
+        }
+
+        // 4. Collectible N95 Mask or Water Lifeline Tanker Drop
+        function createCollectible(kind = 'mask') {
+            const group = new THREE.Group();
+
+            if (kind === 'mask') {
+                // Glowing Emerald Ring + White/Teal N95 Respirator Mask
+                const halo = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.95, 0.07, 8, 24),
+                    new THREE.MeshBasicMaterial({ color: 0x10b981 })
+                );
+                halo.position.y = 1.25;
+                group.add(halo);
+
+                const maskCup = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.55, 12, 12),
+                    new THREE.MeshLambertMaterial({ color: 0xecfdf5 })
+                );
+                maskCup.scale.set(1.15, 0.9, 0.55);
+                maskCup.position.y = 1.25;
+                group.add(maskCup);
+
+                // N95 Filter Valve
+                const valve = new THREE.Mesh(
+                    new THREE.CylinderGeometry(0.16, 0.16, 0.12, 10),
+                    new THREE.MeshBasicMaterial({ color: 0x059669 })
+                );
+                valve.rotation.x = Math.PI / 2;
+                valve.position.set(0.15, 1.22, 0.3);
+                group.add(valve);
+            } else {
+                // Water Lifeline Drop / Blue Tanker Canister
+                const halo = new THREE.Mesh(
+                    new THREE.TorusGeometry(0.95, 0.07, 8, 24),
+                    new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+                );
+                halo.position.y = 1.25;
+                group.add(halo);
+
+                const drop = new THREE.Mesh(
+                    new THREE.ConeGeometry(0.52, 1.15, 12),
+                    new THREE.MeshLambertMaterial({ color: 0x0284c7 })
+                );
+                drop.position.y = 1.35;
+                group.add(drop);
+
+                const baseSphere = new THREE.Mesh(
+                    new THREE.SphereGeometry(0.5, 12, 12),
+                    new THREE.MeshLambertMaterial({ color: 0x38bdf8 })
+                );
+                baseSphere.position.y = 0.95;
+                group.add(baseSphere);
+            }
+
+            const startX = (Math.random() - 0.5) * (state.roadWidth - 4);
+            group.position.set(startX, 0, -140);
+            group.userData = { kind };
+
+            scene.add(group);
+            collectibles.push(group);
+        }
+
+        // --- PARTICLE BURSTS (SPARKS ON NPC COLLISIONS & WATER SPRAY MIST) ---
+        function spawnBurst(x, y, z, colorHex, count = 12, speedScale = 8) {
+            const geo = new THREE.BoxGeometry(0.18, 0.18, 0.18);
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex });
+            for (let i = 0; i < count; i++) {
+                const p = new THREE.Mesh(geo, mat);
+                p.position.set(x, y, z);
+                p.userData = {
+                    vx: (Math.random() - 0.5) * speedScale,
+                    vy: Math.random() * (speedScale * 0.7) + 1.5,
+                    vz: (Math.random() - 0.5) * speedScale,
+                    life: 0.45 + Math.random() * 0.25
+                };
+                scene.add(p);
+                particles.push(p);
+            }
+        }
+
+        // --- PLAYER ACTIONS: ACTIVATE MASK, SPRAY WATER, HORN ---
+        function activateMaskShield() {
+            if (!state.running) return;
+            sfx.init();
+            if (state.maskActiveTimer > 0) {
+                showToast('😷 N95 Mask Already Active!', 'bg-emerald-400 text-slate-950');
+                return;
+            }
+            if (state.maskInventory <= 0) {
+                showToast('⚠️ Out of Masks! Collect N95 on the road!', 'bg-rose-500 text-white');
+                return;
+            }
+            state.maskInventory--;
+            state.maskActiveTimer = 8.0; // 8 seconds of full pollution immunity
+            state.lungHealth = Math.min(100, state.lungHealth + 10);
+            sfx.playMaskActivate();
+            showToast('😷 N95 Activated! Lungs Shielded for 8s!', 'bg-emerald-400 text-slate-950');
+            updateDashboardScreen();
+        }
+
+        function triggerHorn() {
+            if (!state.running) return;
+            sfx.init();
+            sfx.playHorn();
+            showToast('🎺 HORN OK PLEASE! Moving cows & traffic aside', 'bg-amber-400 text-slate-950');
+
+            // Horn nudges nearby cows and NPC cars away from player's lane
+            cows.forEach(cow => {
+                if (cow.position.z > -65 && cow.position.z < 0 && Math.abs(cow.position.x - state.playerX) < 5) {
+                    const pushDir = cow.position.x >= state.playerX ? 1 : -1;
+                    cow.userData.walkVx = pushDir * 6.5;
+                }
+            });
+            npcCars.forEach(car => {
+                if (car.position.z > -65 && car.position.z < 0 && Math.abs(car.position.x - state.playerX) < 5) {
+                    const pushDir = car.position.x >= state.playerX ? 1 : -1;
+                    car.userData.vx = pushDir * 8.5;
+                }
+            });
+        }
+
+        function triggerDamageEffect(amount, message) {
+            state.lungHealth = Math.max(0, state.lungHealth - amount);
+            state.cameraShake = 0.45;
+            sfx.playCrash();
+            showToast(message, 'bg-red-600 text-white');
+            elDamageOverlay.style.opacity = '1';
+            setTimeout(() => {
+                elDamageOverlay.style.opacity = '0';
+            }, 220);
+        }
+
+        // --- RESET & START GAME ---
+        function startGame() {
+            sfx.init();
+
+            // Clear existing dynamic objects
+            [npcCars, cows, potholes, collectibles, particles].forEach(arr => {
+                arr.forEach(obj => scene.remove(obj));
+                arr.length = 0;
+            });
+
+            state.running = true;
+            state.speed = 54;
+            state.playerX = 0;
+            state.steerInput = 0;
+            state.wheelAngle = 0;
+            state.distanceKm = 0;
+            state.aqi = 850;
+            state.baseAqi = 850;
+            state.lungHealth = 100;
+            state.waterTank = 100;
+            state.masksCollected = 0;
+            state.maskInventory = 2;
+            state.maskActiveTimer = 0;
+            state.isSpraying = false;
+            state.cameraShake = 0;
+
+            // Pre-populate road with initial masks, traffic, and cows
+            for (let z = -45; z >= -135; z -= 30) {
+                createCollectible('mask');
+                collectibles[collectibles.length - 1].position.z = z;
+                createNPCCar();
+                npcCars[npcCars.length - 1].position.z = z - 12;
+            }
+
+            elModalOverlay.classList.add('hidden');
+            clock.getDelta();
+            updateHUD();
+            updateDashboardScreen();
+        }
+
+        function gameOver() {
+            state.running = false;
+            state.isSpraying = false;
+            elWaterOverlay.style.opacity = '0';
+            elMaskOverlay.style.opacity = '0';
+
+            elModalTitle.textContent = 'LUNG HEALTH CRITICAL!';
+            elModalSubtitle.innerHTML = `Heavy Delhi smog (AQI <b>${Math.round(state.aqi)}</b>) and traffic collisions overwhelmed your lungs. Collect more N95 masks & use the Anti-Smog Water Cannon to survive further!`;
+
+            document.getElementById('stat-masks').textContent = state.masksCollected;
+            document.getElementById('stat-dist').textContent = `${state.distanceKm.toFixed(2)} km`;
+            document.getElementById('stat-loc').textContent = elLandmarkName.textContent;
+            elFinalStats.classList.remove('hidden');
+
+            document.getElementById('btn-start-game').textContent = '🔄 Play Again on Delhi Ring Road';
+            elModalOverlay.classList.remove('hidden');
+        }
+
+        // --- UPDATE HUD & "DELHI KA MAP" RADAR ---
+        function updateHUD() {
+            const roundedAqi = Math.round(state.aqi);
+            elAqiValue.textContent = roundedAqi;
+            if (roundedAqi >= 700) {
+                elAqiStatus.textContent = 'SEVERE+';
+                elAqiStatus.className = 'text-[10px] bg-red-600/30 border border-red-500 text-red-200 px-1.5 py-0.5 rounded font-bold uppercase';
+            } else if (roundedAqi >= 450) {
+                elAqiStatus.textContent = 'HAZARDOUS';
+                elAqiStatus.className = 'text-[10px] bg-amber-600/30 border border-amber-500 text-amber-200 px-1.5 py-0.5 rounded font-bold uppercase';
+            } else {
+                elAqiStatus.textContent = 'CLEARING';
+                elAqiStatus.className = 'text-[10px] bg-sky-600/30 border border-sky-400 text-sky-200 px-1.5 py-0.5 rounded font-bold uppercase';
+            }
+
+            elSpeedVal.innerHTML = `${Math.round(state.speed * 1.35)} <small class="text-[10px]">km/h</small>`;
+
+            const hp = Math.max(0, Math.round(state.lungHealth));
+            elHealthBar.style.width = `${hp}%`;
+            elHealthText.textContent = `${hp}%`;
+
+            const wt = Math.max(0, Math.round(state.waterTank));
+            elWaterBar.style.width = `${wt}%`;
+            elWaterText.textContent = `${wt}%`;
+
+            elDistanceVal.textContent = `${state.distanceKm.toFixed(1)} km`;
+            elMaskTotal.textContent = state.masksCollected;
+            elMaskStockPill.textContent = `Stock: ${state.maskInventory}`;
+            elBtnMaskBadge.textContent = `x${state.maskInventory}`;
+
+            // Landmark progression
+            let currentLoc = DELHI_LANDMARKS[0].name;
+            for (let i = 0; i < DELHI_LANDMARKS.length; i++) {
+                if (state.distanceKm >= DELHI_LANDMARKS[i].dist) {
+                    currentLoc = DELHI_LANDMARKS[i].name;
+                }
+            }
+            elLandmarkName.textContent = currentLoc;
+
+            // Mask shield UI state
+            if (state.maskActiveTimer > 0) {
+                elShieldBadge.classList.remove('hidden');
+                elMaskTimerBanner.classList.remove('hidden');
+                elMaskTimerSec.textContent = `${state.maskActiveTimer.toFixed(1)}s`;
+                elMaskOverlay.style.opacity = '1';
+            } else {
+                elShieldBadge.classList.add('hidden');
+                elMaskTimerBanner.classList.add('hidden');
+                elMaskOverlay.style.opacity = '0';
+            }
+
+            drawDelhiKaMap();
+        }
+
+        function drawDelhiKaMap() {
+            const w = minimapCanvas.width;
+            const h = minimapCanvas.height;
+            minimapCtx.clearRect(0, 0, w, h);
+
+            // Dark radar background with Ring Road lanes
+            minimapCtx.fillStyle = '#0f172a';
+            minimapCtx.fillRect(0, 0, w, h);
+
+            // Road corridor
+            const roadLeft = w * 0.18;
+            const roadRight = w * 0.82;
+            const roadW = roadRight - roadLeft;
+            minimapCtx.fillStyle = '#1e293b';
+            minimapCtx.fillRect(roadLeft, 0, roadW, h);
+
+            // Center dashed divider
+            minimapCtx.strokeStyle = '#475569';
+            minimapCtx.setLineDash([4, 4]);
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(w / 2, 0);
+            minimapCtx.lineTo(w / 2, h);
+            minimapCtx.stroke();
+            minimapCtx.setLineDash([]);
+
+            const mapX = (worldX) => {
+                const norm = (worldX + state.roadWidth / 2) / state.roadWidth;
+                return roadLeft + norm * roadW;
+            };
+            const mapZ = (worldZ) => {
+                // worldZ from -140 (top of map) to 0 (bottom of map)
+                const norm = 1 - Math.min(1, Math.max(0, -worldZ / 140));
+                return norm * (h - 14) + 6;
+            };
+
+            // Draw Potholes (Gray dots)
+            minimapCtx.fillStyle = '#78716c';
+            potholes.forEach(p => {
+                minimapCtx.beginPath();
+                minimapCtx.arc(mapX(p.position.x), mapZ(p.position.z), 2.5, 0, Math.PI * 2);
+                minimapCtx.fill();
+            });
+
+            // Draw Cows (White/Amber squares)
+            minimapCtx.fillStyle = '#fef08a';
+            cows.forEach(c => {
+                minimapCtx.fillRect(mapX(c.position.x) - 3, mapZ(c.position.z) - 3, 6, 6);
+            });
+
+            // Draw NPC Cars (Red rectangles)
+            minimapCtx.fillStyle = '#ef4444';
+            npcCars.forEach(car => {
+                minimapCtx.fillRect(mapX(car.position.x) - 3, mapZ(car.position.z) - 4, 6, 8);
+            });
+
+            // Draw Collectibles (Emerald for Masks, Cyan for Water)
+            collectibles.forEach(item => {
+                minimapCtx.fillStyle = item.userData.kind === 'mask' ? '#10b981' : '#38bdf8';
+                minimapCtx.beginPath();
+                minimapCtx.arc(mapX(item.position.x), mapZ(item.position.z), 4, 0, Math.PI * 2);
+                minimapCtx.fill();
+            });
+
+            // Draw Player FPV Car Triangle at bottom
+            const px = mapX(state.playerX);
+            const py = h - 10;
+            minimapCtx.fillStyle = '#f59e0b';
+            minimapCtx.beginPath();
+            minimapCtx.moveTo(px, py - 7);
+            minimapCtx.lineTo(px - 6, py + 5);
+            minimapCtx.lineTo(px + 6, py + 5);
+            minimapCtx.closePath();
+            minimapCtx.fill();
+        }
+
+        // --- MAIN GAME UPDATE LOOP ---
+        let hudRefreshCounter = 0;
+
+        function updateGame(dt) {
+            // Distance & progression
+            state.distanceKm += (state.speed * dt) / 520;
+            state.baseSpeed = Math.min(72, 52 + state.distanceKm * 2.2);
+            state.speed += (state.baseSpeed - state.speed) * dt * 3;
+
+            // Player Steering & Cockpit motion
+            const maxX = state.roadWidth / 2 - 1.6;
+            const lateralSpeed = 19;
+            state.playerX += state.steerInput * lateralSpeed * dt;
+            state.playerX = Math.max(-maxX, Math.min(maxX, state.playerX));
+
+            // Smooth Steering Wheel Rotation in FPV
+            const targetWheel = -state.steerInput * 0.85;
+            state.wheelAngle += (targetWheel - state.wheelAngle) * dt * 10;
+            if (steeringWheelGroup) {
+                steeringWheelGroup.rotation.z = state.wheelAngle;
+            }
+
+            // Camera & Cockpit synchronization with suspension bob & shake
+            state.cockpitBob += dt * (state.speed * 0.22);
+            let shakeX = 0, shakeY = 0;
+            if (state.cameraShake > 0) {
+                state.cameraShake = Math.max(0, state.cameraShake - dt * 1.8);
+                shakeX = (Math.random() - 0.5) * state.cameraShake * 0.45;
+                shakeY = (Math.random() - 0.5) * state.cameraShake * 0.45;
+            }
+
+            const bobOffset = Math.sin(state.cockpitBob) * 0.025;
+            camera.position.x = state.playerX + shakeX;
+            camera.position.y = 2.15 + bobOffset + shakeY;
+            camera.rotation.z = -state.steerInput * 0.035;
+
+            cockpitGroup.position.x = state.playerX + shakeX * 0.5;
+            cockpitGroup.position.y = bobOffset * 0.8 + shakeY * 0.5;
+            cockpitGroup.rotation.z = -state.steerInput * 0.025;
+
+            // Anti-Smog Water Gun Spraying Logic
+            if (state.isSpraying && state.waterTank > 0) {
+                state.waterTank = Math.max(0, state.waterTank - dt * 22);
+                state.aqi = Math.max(260, state.aqi - dt * 260);
+                state.lungHealth = Math.min(100, state.lungHealth + dt * 6.5);
+
+                // Clear fog & animate wipers
+                scene.fog.density += (0.0085 - scene.fog.density) * dt * 5;
+                currentFogColor.lerp(SMOG_COLOR_CLEAR, dt * 4);
+                elWaterOverlay.style.opacity = '1';
+                elSmogVignette.style.boxShadow = 'inset 0 0 60px rgba(56, 189, 248, 0.35)';
+
+                const wiperWave = Math.sin(clock.elapsedTime * 14) * 0.55;
+                wiperLeft.rotation.z = wiperWave;
+                wiperRight.rotation.z = wiperWave;
+
+                // Spawn water mist droplets from hood nozzle
+                if (Math.random() < 0.75) {
+                    spawnBurst(state.playerX, 1.45, -1.8, 0x7dd3fc, 2, 6);
+                }
+            } else {
+                // Smog thickens back up toward Delhi peak AQI
+                state.baseAqi = Math.min(999, 850 + state.distanceKm * 18);
+                state.aqi += (state.baseAqi - state.aqi) * dt * 0.65;
+
+                const targetFogDensity = 0.021 + (state.aqi - 500) * 0.000018;
+                scene.fog.density += (Math.max(0.014, targetFogDensity) - scene.fog.density) * dt * 2.5;
+                currentFogColor.lerp(SMOG_COLOR_THICK, dt * 2.5);
+                elWaterOverlay.style.opacity = '0';
+                elSmogVignette.style.boxShadow = 'inset 0 0 110px rgba(95, 75, 45, 0.78)';
+
+                wiperLeft.rotation.z *= 0.85;
+                wiperRight.rotation.z *= 0.85;
+            }
+
+            // N95 Mask Timer & Pollution Lung Health Drain
+            if (state.maskActiveTimer > 0) {
+                state.maskActiveTimer = Math.max(0, state.maskActiveTimer - dt);
+            } else {
+                // Continuous pollution drain proportional to AQI
+                const drainRate = (state.aqi / 320) * 1.05;
+                state.lungHealth = Math.max(0, state.lungHealth - drainRate * dt);
+            }
+
+            // Check Game Over
+            if (state.lungHealth <= 0) {
+                gameOver();
+                return;
+            }
+
+            // Move Road Stripes
+            roadStripes.forEach(stripe => {
+                stripe.position.z += state.speed * dt;
+                if (stripe.position.z > 8) {
+                    stripe.position.z -= 240;
+                }
+            });
+
+            // Move Roadside Props (Streetlights & Signboards)
+            roadsideProps.forEach(prop => {
+                prop.position.z += state.speed * dt;
+                if (prop.position.z > 12) {
+                    prop.position.z -= 12 * 22;
+                }
+            });
+
+            // Move Ambient Smog Particles
+            if (smogParticles) {
+                const posArr = smogParticles.geometry.attributes.position.array;
+                for (let i = 0; i < posArr.length; i += 3) {
+                    posArr[i + 2] += state.speed * 0.7 * dt;
+                    if (posArr[i + 2] > 5) {
+                        posArr[i + 2] = -115;
+                        posArr[i] = (Math.random() - 0.5) * 34;
+                    }
+                }
+                smogParticles.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // --- SPAWN OBSTACLES & COLLECTIBLES ---
+            state.spawnTimers.npc -= dt;
+            if (state.spawnTimers.npc <= 0 && npcCars.length < 7) {
+                createNPCCar();
+                state.spawnTimers.npc = 1.1 + Math.random() * 0.9;
+            }
+
+            state.spawnTimers.cow -= dt;
+            if (state.spawnTimers.cow <= 0 && cows.length < 4) {
+                createCow();
+                state.spawnTimers.cow = 2.6 + Math.random() * 2.0;
+            }
+
+            state.spawnTimers.pothole -= dt;
+            if (state.spawnTimers.pothole <= 0 && potholes.length < 6) {
+                createPothole();
+                state.spawnTimers.pothole = 1.6 + Math.random() * 1.4;
+            }
+
+            state.spawnTimers.mask -= dt;
+            if (state.spawnTimers.mask <= 0) {
+                createCollectible('mask');
+                state.spawnTimers.mask = 1.8 + Math.random() * 1.2;
+            }
+
+            state.spawnTimers.water -= dt;
+            if (state.spawnTimers.water <= 0) {
+                createCollectible('water');
+                state.spawnTimers.water = 3.6 + Math.random() * 2.0;
+            }
+
+            // --- UPDATE CHAOTIC NPC CARS & FREQUENT NPC-TO-NPC COLLISIONS ---
+            for (let i = npcCars.length - 1; i >= 0; i--) {
+                const car = npcCars[i];
+                const data = car.userData;
+                data.swerveTimer += dt * data.swerveFreq;
+                if (data.hitCooldown > 0) data.hitCooldown -= dt;
+
+                // Relative forward motion toward player
+                car.position.z += (state.speed - data.speed) * dt;
+                car.position.x += data.vx * dt;
+                car.rotation.y = -data.vx * 0.04;
+
+                // Keep inside road boundaries or bounce aggressively
+                const bound = state.roadWidth / 2 - 1.4;
+                if (car.position.x < -bound || car.position.x > bound) {
+                    data.vx *= -1;
+                    car.position.x = Math.max(-bound, Math.min(bound, car.position.x));
+                } else if (Math.random() < 0.02) {
+                    // Sudden Delhi lane change
+                    data.vx = (Math.random() - 0.5) * 11;
+                }
+
+                // Check NPC-to-NPC frequent collisions!
+                for (let j = i - 1; j >= 0; j--) {
+                    const other = npcCars[j];
+                    const dx = car.position.x - other.position.x;
+                    const dz = car.position.z - other.position.z;
+                    if (Math.abs(dx) < 2.1 && Math.abs(dz) < 3.8) {
+                        // Bounce NPCs off each other and emit orange collision sparks
+                        const tempVx = data.vx;
+                        data.vx = other.userData.vx * 1.2 + (dx >= 0 ? 4 : -4);
+                        other.userData.vx = tempVx * 1.2 + (dx >= 0 ? -4 : 4);
+                        if (data.hitCooldown <= 0 && car.position.z > -95) {
+                            spawnBurst((car.position.x + other.position.x) / 2, 1.0, (car.position.z + other.position.z) / 2, 0xf97316, 8, 9);
+                            data.hitCooldown = 0.6;
+                        }
+                    }
+                }
+
+                // Check Player collision with NPC Car
+                if (car.position.z > -3.4 && car.position.z < 1.2 && Math.abs(car.position.x - state.playerX) < 1.95) {
+                    spawnBurst(car.position.x, 1.2, car.position.z, 0xef4444, 16, 12);
+                    triggerDamageEffect(16, '💥 Traffic Collision! -16% Lung Health');
+                    state.speed = Math.max(28, state.speed - 18);
+                    scene.remove(car);
+                    npcCars.splice(i, 1);
+                    continue;
+                }
+
+                if (car.position.z > 10) {
+                    scene.remove(car);
+                    npcCars.splice(i, 1);
+                }
+            }
+
+            // --- UPDATE WANDERING / SITTING COWS ---
+            for (let i = cows.length - 1; i >= 0; i--) {
+                const cow = cows[i];
+                cow.position.z += state.speed * dt;
+                cow.position.x += cow.userData.walkVx * dt;
+
+                const bound = state.roadWidth / 2 - 1.5;
+                if (cow.position.x < -bound || cow.position.x > bound) {
+                    cow.userData.walkVx *= -1;
+                }
+
+                // Player collision with Cow
+                if (!cow.userData.hit && cow.position.z > -3.1 && cow.position.z < 1.0 && Math.abs(cow.position.x - state.playerX) < 1.8) {
+                    cow.userData.hit = true;
+                    spawnBurst(cow.position.x, 1.2, cow.position.z, 0xfbbf24, 14, 10);
+                    triggerDamageEffect(20, '🐄 Hit a Cow on the Road! Use Horn next time! -20%');
+                    state.speed = Math.max(24, state.speed - 24);
+                }
+
+                if (cow.position.z > 10) {
+                    scene.remove(cow);
+                    cows.splice(i, 1);
+                }
+            }
+
+            // --- UPDATE POTHOLES ---
+            for (let i = potholes.length - 1; i >= 0; i--) {
+                const p = potholes[i];
+                p.position.z += state.speed * dt;
+
+                if (!p.userData.triggered && p.position.z > -2.5 && p.position.z < 1.0 && Math.abs(p.position.x - state.playerX) < p.userData.radius + 0.55) {
+                    p.userData.triggered = true;
+                    triggerDamageEffect(9, '🕳️ Deep Delhi Pothole! Suspension Jolt -9%');
+                    state.cameraShake = 0.65;
+                    state.speed = Math.max(32, state.speed - 12);
+                }
+
+                if (p.position.z > 10) {
+                    scene.remove(p);
+                    potholes.splice(i, 1);
+                }
+            }
+
+            // --- UPDATE COLLECTIBLES (N95 MASKS & WATER DROPS) ---
+            for (let i = collectibles.length - 1; i >= 0; i--) {
+                const item = collectibles[i];
+                item.position.z += state.speed * dt;
+                item.rotation.y += dt * 2.8;
+
+                // Pickup check
+                if (item.position.z > -3.2 && item.position.z < 1.5 && Math.abs(item.position.x - state.playerX) < 2.1) {
+                    if (item.userData.kind === 'mask') {
+                        state.masksCollected++;
+                        state.maskInventory++;
+                        state.lungHealth = Math.min(100, state.lungHealth + 12);
+                        sfx.playPickup('mask');
+                        spawnBurst(item.position.x, 1.3, item.position.z, 0x10b981, 12, 8);
+                        showToast('😷 N95 Mask Collected! +12% Lung Health & +1 Stock', 'bg-emerald-400 text-slate-950');
+                    } else {
+                        state.waterTank = Math.min(100, state.waterTank + 38);
+                        sfx.playPickup('water');
+                        spawnBurst(item.position.x, 1.3, item.position.z, 0x38bdf8, 12, 8);
+                        showToast('💧 Water Tanker Collected! +38% Anti-Smog Water', 'bg-sky-400 text-slate-950');
+                    }
+                    updateDashboardScreen();
+                    scene.remove(item);
+                    collectibles.splice(i, 1);
+                    continue;
+                }
+
+                if (item.position.z > 10) {
+                    scene.remove(item);
+                    collectibles.splice(i, 1);
+                }
+            }
+
+            // --- UPDATE SPARK & WATER MIST PARTICLES ---
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.userData.life -= dt;
+                p.position.x += p.userData.vx * dt;
+                p.position.y += p.userData.vy * dt;
+                p.position.z += p.userData.vz * dt;
+                p.scale.multiplyScalar(0.94);
+                if (p.userData.life <= 0) {
+                    scene.remove(p);
+                    particles.splice(i, 1);
+                }
+            }
+
+            // Periodic HUD & Cabin Sensor Screen updates
+            hudRefreshCounter += dt;
+            if (hudRefreshCounter > 0.08) {
+                hudRefreshCounter = 0;
+                updateHUD();
+                updateDashboardScreen();
+            }
+        }
+
+        // --- CONTROLS BINDING (MOBILE TOUCH + KEYBOARD + SWIPE) ---
+        function bindControls() {
+            const btnLeft = document.getElementById('btn-left');
+            const btnRight = document.getElementById('btn-right');
+            const btnSpray = document.getElementById('btn-spray');
+            const btnMask = document.getElementById('btn-mask');
+            const btnHorn = document.getElementById('btn-horn');
+            const btnStart = document.getElementById('btn-start-game');
+
+            const setSteer = (val) => { state.steerInput = val; };
+
+            // Left Steering Button
+            ['mousedown', 'touchstart'].forEach(evt =>
+                btnLeft.addEventListener(evt, (e) => { e.preventDefault(); setSteer(-1); })
+            );
+            ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt =>
+                btnLeft.addEventListener(evt, (e) => { e.preventDefault(); if (state.steerInput < 0) setSteer(0); })
+            );
+
+            // Right Steering Button
+            ['mousedown', 'touchstart'].forEach(evt =>
+                btnRight.addEventListener(evt, (e) => { e.preventDefault(); setSteer(1); })
+            );
+            ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt =>
+                btnRight.addEventListener(evt, (e) => { e.preventDefault(); if (state.steerInput > 0) setSteer(0); })
+            );
+
+            // Spray Water Hold Button
+            ['mousedown', 'touchstart'].forEach(evt =>
+                btnSpray.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    sfx.init();
+                    if (state.waterTank <= 0) {
+                        showToast('💧 Water Lifeline Empty! Collect Blue Drops!', 'bg-sky-500 text-white');
+                    }
+                    state.isSpraying = true;
+                })
+            );
+            ['mouseup', 'mouseleave', 'touchend', 'touchcancel'].forEach(evt =>
+                btnSpray.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    state.isSpraying = false;
+                })
+            );
+
+            // Activate Mask Button
+            ['click', 'touchstart'].forEach(evt =>
+                btnMask.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    activateMaskShield();
+                })
+            );
+
+            // Horn Button
+            ['click', 'touchstart'].forEach(evt =>
+                btnHorn.addEventListener(evt, (e) => {
+                    e.preventDefault();
+                    triggerHorn();
+                })
+            );
+
+            // Start / Restart Modal Button
+            btnStart.addEventListener('click', startGame);
+
+            // Keyboard Controls
+            const keysDown = {};
+            window.addEventListener('keydown', (e) => {
+                keysDown[e.code] = true;
+                if (e.code === 'ArrowLeft' || e.code === 'KeyA') state.steerInput = -1;
+                if (e.code === 'ArrowRight' || e.code === 'KeyD') state.steerInput = 1;
+                if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') state.isSpraying = true;
+                if (e.code === 'KeyM' || e.code === 'ShiftLeft' || e.code === 'ShiftRight') activateMaskShield();
+                if (e.code === 'KeyH') triggerHorn();
+            });
+
+            window.addEventListener('keyup', (e) => {
+                keysDown[e.code] = false;
+                if (e.code === 'ArrowLeft' || e.code === 'KeyA') {
+                    state.steerInput = (keysDown['ArrowRight'] || keysDown['KeyD']) ? 1 : 0;
+                }
+                if (e.code === 'ArrowRight' || e.code === 'KeyD') {
+                    state.steerInput = (keysDown['ArrowLeft'] || keysDown['KeyA']) ? -1 : 0;
+                }
+                if (e.code === 'Space' || e.code === 'KeyW' || e.code === 'ArrowUp') {
+                    state.isSpraying = false;
+                }
+            });
+        }
+
+        // --- ANIMATION LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+            const dt = Math.min(clock.getDelta(), 0.1);
+            if (state.running) {
+                updateGame(dt);
+            }
+            renderer.render(scene, camera);
+        }
+
+        window.onload = function () {
+            initThree();
+            bindControls();
+            animate();
+        };
+    </script>
+</body>
+</html>
